@@ -19,7 +19,7 @@ struct vector_mem {
     return (*block)[i - 1];
   }
 
-  bool is_null(Index i) const { return i==0; }
+  bool is_null(Index i) const { return i == 0; }
 
   Index make_index(auto&&... args) {
     block->emplace_back(FWD(args)...);
@@ -131,6 +131,7 @@ class Heap {
 template<class Coll, class T>
 concept CollOf = requires(Coll c, T x) {
   { c.cons(x) } -> std::same_as<Coll>;
+  { c.pop() } -> std::same_as<T>;
 };
 
 template<class Coll, std::ranges::range Rng>
