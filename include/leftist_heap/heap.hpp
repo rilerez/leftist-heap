@@ -9,33 +9,34 @@
 #include <ranges>
 
 template<class T>
-struct vecmem {
-  using Index = unsigned int;
+struct vector_mem {
+  // probably needs better name. Pointdex? Inder?
   std::vector<T>* block;
+  using Index = size_t;
 
   T const& operator[](Index i) const {
     ASSERT(!is_null(i));
     return (*block)[i - 1];
   }
 
-  bool is_null(Index i) const { return i; }
+  bool is_null(Index i) const { return i==0; }
 
   Index make_index(auto&&... args) {
-   block->emplace_back(FWD(args)...);
-   return block->size();
+    block->emplace_back(FWD(args)...);
+    return block->size();
   }
 };
 
 template<class T>
 struct shared_ptr_mem {
-  using Index = std::shared_ptr<T>;
+  using Index = std::shared_ptr<void>;
 
-  T const& operator[](Index i) const {
+  T const& operator[](Index const& i) const {
     ASSERT(!is_null(i));
-    return *i;
+    return *static_cast<T*>(i.get());
   }
 
-  bool is_null(Index x) const { return x == nullptr; }
+  bool is_null(Index const& x) const { return x == nullptr; }
   auto make_index(auto&&... args) ARROW(std::make_shared<T>(FWD(args)...))
 };
 
@@ -44,15 +45,15 @@ constexpr auto cmp_by(auto f, Less less = {}) noexcept {
   return [=] FN(less(f(_0), f(_1)));
 }
 
-template<class T, template<class> class Mem, class N = int>
+template<class T, class index, class Rank = int>
 struct Node {
-  using Index = typename Mem<Node>::Index;
+  using Index = index;
   T     elt;
-  N     rank;
+  Rank  rank;
   Index left;
   Index right;
 
-  static N rank_of(auto& mem, Index n) {
+  static Rank rank_of(auto& mem, Index n) {
     return mem.is_null(n) ? 0 : mem[n].rank;
   }
 
@@ -88,9 +89,9 @@ struct Node {
   }
 };
 
-template<class T, class Less=std::less<>, template<class> class Mem_ = shared_ptr_mem>
+template<class T, class Less, template<class> class Mem_, class Node>
 class Heap {
-  using node = Node<T, Mem_>;
+  using node = Node;
   using Mem  = Mem_<node>;
   using idx  = typename node::Index;
 
