@@ -11,6 +11,7 @@
 template<class T>
 struct vector_mem {
   // probably needs better name. Pointdex? Inder?
+  // key handle reference
   std::vector<T>* block;
   using Index = size_t;
 
@@ -128,14 +129,7 @@ class Heap {
   }
 };
 
-template<class Coll, class T>
-concept CollOf = requires(Coll c, T x) {
-  { c.cons(x) } -> std::same_as<Coll>;
-  { c.pop() } -> std::same_as<T>;
-};
-
 template<class Coll, std::ranges::range Rng>
-requires CollOf<Coll, std::ranges::range_value_t<Rng>>
 inline auto into(Coll coll, Rng const data) {
   for(auto x : data) coll = coll.cons(x);
   return coll;
