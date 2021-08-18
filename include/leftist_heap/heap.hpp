@@ -8,20 +8,47 @@
 #include <algorithm>
 #include <ranges>
 
-template<class T>
-struct vector_mem {
-  // probably needs better name. Pointdex? Inder?
-  // key handle reference
-  using Index = size_t;
-  std::vector<T>* block;
+#include <limits>
+#include <cstdint>
 
-  T const& operator[](Index i) const {
+template<class To, class From>
+To narrow(From const x) {
+  To y = static_cast<To>(x);
+  ASSERT(x == static_cast<From>(y));
+  return y;
+}
+
+// TODO: noexcept correctness and assertions?
+// we don't necessarily want to abort if an assertion is triggered
+// we may want to throw and then autosave
+// But if we won't check the assertions, we do want noexcept
+// how important is that? i suspect most of these get inlined
+
+template<class T, class vector = std::vector<T>, class Index_Num = size_t>
+// It makes sense to use this with a boost::static_vector for example
+// Or to use different allocators.
+struct vector_mem {
+  // TODO: probably needs better name. Pointdex? Inder?
+  // key handle reference
+  using Index = Index_Num;
+  vector* block;
+
+  // TODO: what is the right way to pass index?
+  // ideally they are small, so by value
+  // but they might do resource management, so by reference (shared_ptr
+  // -- prevent extra copy) I want to use a Read template. Is this too
+  // complicated?
+  T const& operator[](Index const& i) const {
     ASSERT(!is_null(i));
+    ASSERT_PARANOID(0 < i);
+    WITH_DIAGNOSTIC_TWEAK(
+        IGNORE_WASSUME, ASSERT_PARANOID(i <= block->size());)
+    // why does clang think vector::size() has sideffects?
     return (*block)[i - 1];
   }
 
-  Index null() const { return 0; }
-  bool  is_null(Index i) const { return i == 0; }
+  Index null() const noexcept { return 0; }
+  bool  is_null(Index const& i) const noexcept { return i == 0; }
 
   Index make_index(auto&&... args) {
     block->emplace_back(FWD(args)...);
@@ -44,70 +71,88 @@ struct shared_ptr_mem {
 };
 
 template<class Less = std::less<>>
-constexpr auto cmp_by(auto f, Less less = {}) noexcept {
-  return [=] FN(less(f(_0), f(_1)));
+constexpr auto cmp_by(auto&& f, Less&& less = {}) noexcept {
+  return [f=FWD(f), less=FWD(less)] FN(less(f(_0), f(_1)));
 }
 
-template<class T, class index, class Rank = int>
+template<class T, class index, class Rank = std::uint8_t>
 struct Node {
   using Index = index;
+  // TODO: how much can these be compressed?
+  // realistically, Index cannot be smaller than uint8: 2^4= 16 very small heap
+  // when is it small enough to be worth just copying a vector/vector heap?
   T     elt;
-  Rank  rank;
   Index left;
   Index right;
+  Rank  rank; // should we store rank-1 instead? Might increase range but complicates logic
+  // rank <= floor(log(n+1))
+  // this can probably be much smaller: ~ log(bit_width<Index>)
+  // if index =uint64
+  // max # is #uint64s - 1 (-1 for null) = uint64max = 2^64-1
+  // so rank <= 64
 
-  static Rank rank_of(auto& mem, Index n) {
+  static Rank rank_of(auto const& mem, Index const& n) {
     return mem.is_null(n) ? Rank{} : mem[n].rank;
   }
 
-  static Index make(auto& mem, T e, Index node1, Index node2) {
-    auto [r, l] =
+  static Index
+      make(auto& mem, T e, Index node1, Index node2) {
+    auto const [r, l] =
         std::minmax(node1, node2, cmp_by([&] FN(rank_of(mem, _))));
-    auto old_rank = rank_of(mem, r);
-    return mem.template make_index(
-        Node{.elt = e, .rank = old_rank + 1, .left = l, .right = r});
+    auto const old_rank = rank_of(mem, r);
+    return mem.template make_index(Node{
+        .elt   = std::move(e),
+        .left  = std::move(l),
+        .right = std::move(r),
+        .rank  = narrow<Rank>(old_rank + 1)});
   }
 
-  static Index merge(auto& mem, auto less, Index node1, Index node2) {
+  static Index
+      merge(auto& mem, auto less, Index const& node1, Index const& node2) {
     if(mem.is_null(node1)) return node2;
-    else if(mem.is_null(node2))
-      return node1;
+    else if(mem.is_null(node2)) return node1;
     else if(less(mem[node2].elt, mem[node1].elt))
       return make(mem,
                   mem[node2].elt,
                   mem[node2].left,
-                  merge(mem, less, node1, mem[node2].left));
+                  merge(mem, less, node1, mem[node2].right));
     else
       return make(mem,
                   mem[node1].elt,
                   mem[node1].left,
                   merge(mem, less, mem[node1].right, node2));
+    // always merge with the right b/c of leftist property
   }
 
   template<class size_type>
-  static size_type count(auto const& mem, Index node) {
-    return mem.is_null(node) ? size_type{}
-                             : (size_type{1} + count(mem[node].left)
-                                + count(mem[node].right));
+  static size_type count(auto const& mem, Index const& node) {
+    return mem.is_null(node)
+             ? size_type{}
+             : (size_type{1} + count(mem[node].left)
+                + count(mem[node].right));
   }
 };
 
-template<class T, class Less, template<class> class Mem_, class Node>
+// as of now we need to say the mem and node types in order to construct
+// the vector for the vector memory
+template<class T, class Less, class Mem_, class Node>
+// TODO: Are there other useful definitions of Node?
 class Heap {
-  using node      = Node;
-  using Mem       = Mem_<node>;
-  using idx       = typename node::Index;
-  using size_type = std::size_t;
+  using node = Node;
+  using Mem  = Mem_;
+  using idx  = typename node::Index;
 
   [[no_unique_address]] Less        less_;
   [[no_unique_address]] mutable Mem mem_;
   idx                               root_{};
 
-  Heap(Mem mem, Less less, idx h) : less_{less}, mem_{mem}, root_{h} {}
+  Heap(Mem mem, Less less, idx h)
+      : less_{std::move(less)}, mem_{std::move(mem)}, root_{std::move(h)} {}
 
  public:
+  using size_type = std::size_t;
   explicit Heap(Mem mem = {}, Less less = {})
-      : less_{less}, mem_{mem} {}
+      : less_{std::move(less)}, mem_{std::move(mem)} {}
 
   bool empty() const { return mem_.is_null(root_); }
 

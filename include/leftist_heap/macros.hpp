@@ -45,4 +45,15 @@ struct fake {
 
 #define FN(...) LEFTIST_HEAP_FN_(GENSYM(fn_type), __VA_ARGS__)
 
+
+#if defined(__clang__)
+#  define IGNORE_WASSUME                                               \
+    _Pragma("clang diagnostic ignored \"-Wassume\"")
+#else
+#  define IGNORE_WASSUME
+#endif
+
+#define WITH_DIAGNOSTIC_TWEAK(diagnostic, ...)                         \
+  HEDLEY_DIAGNOSTIC_PUSH diagnostic __VA_ARGS__ HEDLEY_DIAGNOSTIC_POP
+
 #endif // LEFTIST_HEAP_MACROS_INCLUDE_GUARD

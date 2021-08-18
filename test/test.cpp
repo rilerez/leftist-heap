@@ -4,8 +4,8 @@
 
 #include <catch2/catch.hpp>
 
-using MyHeap =
-    Heap<int, std::less<>, shared_ptr_mem, Node<int, std::shared_ptr<void>>>;
+using MyNode = Node<int, std::shared_ptr<void>>;
+using MyHeap = Heap<int, std::less<>, shared_ptr_mem<MyNode>, MyNode>;
 
 TEST_CASE("A new Heap is empty") {
   MyHeap h{};
@@ -32,13 +32,13 @@ TEST_CASE("Popping a heap with one element gives you the empty heap") {
 
 TEST_CASE("Popping a heap sorts") {
   MyHeap h0{};
-  auto   h1 = into(h0, std::initializer_list<int>{5, 1, 2});
+  auto   h1 = into(h0, std::initializer_list<int>{5, 1, 2, 10, 3});
   REQUIRE(h1.pop().peek() == 2);
 }
 
 TEST_CASE("Vector heap can push"){
   using node = Node<int, size_t>;
-  using VecHeap = Heap<int, std::less<>, vector_mem, node>;
+  using VecHeap = Heap<int, std::less<>, vector_mem<node>, node>;
 
   std::vector<node> block{};
 
