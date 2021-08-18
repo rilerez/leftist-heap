@@ -18,6 +18,16 @@ To narrow(From const x) {
   return y;
 }
 
+template<class T>
+constexpr bool easy_to_copy =
+    std::is_trivially_copyable_v<T> && sizeof(T) <= 3 * sizeof(void*);
+
+template<class T>
+using Read = std::conditional_t<easy_to_copy<T>, T const, T const&>;
+
+static_assert(std::is_reference_v<Read<std::shared_ptr<void>>>);
+static_assert(!std::is_reference_v<Read<int>>);
+
 // TODO: noexcept correctness and assertions?
 // we don't necessarily want to abort if an assertion is triggered
 // we may want to throw and then autosave
@@ -38,7 +48,7 @@ struct vector_mem {
   // but they might do resource management, so by reference (shared_ptr
   // -- prevent extra copy) I want to use a Read template. Is this too
   // complicated?
-  T const& operator[](Index const& i) const {
+  T const& operator[](Index i) const {
     ASSERT(!is_null(i));
     ASSERT_PARANOID(0 < i);
     WITH_DIAGNOSTIC_TWEAK(
@@ -48,7 +58,7 @@ struct vector_mem {
   }
 
   Index null() const noexcept { return 0; }
-  bool  is_null(Index const& i) const noexcept { return i == 0; }
+  bool  is_null(Read<Index> i) const noexcept { return i == 0; }
 
   Index make_index(auto&&... args) {
     block->emplace_back(FWD(args)...);
@@ -72,7 +82,7 @@ struct shared_ptr_mem {
 
 template<class Less = std::less<>>
 constexpr auto cmp_by(auto&& f, Less&& less = {}) noexcept {
-  return [f=FWD(f), less=FWD(less)] FN(less(f(_0), f(_1)));
+  return [ f = FWD(f), less = FWD(less) ] FN(less(f(_0), f(_1)));
 }
 
 template<class T, class index, class Rank = std::uint8_t>
@@ -91,26 +101,26 @@ struct Node {
   // max # is #uint64s - 1 (-1 for null) = uint64max = 2^64-1
   // so rank <= 64
 
-  static Rank rank_of(auto const& mem, Index const& n) {
+  static Rank rank_of(auto const mem, Read<Index> n) {
     return mem.is_null(n) ? Rank{} : mem[n].rank;
   }
 
   static Index
-      make(auto& mem, T e, Index node1, Index node2) {
-    auto const [r, l] =
+      make(auto mem, T e, Read<Index> node1, Read<Index> node2) {
+    auto const& [r, l] =
         std::minmax(node1, node2, cmp_by([&] FN(rank_of(mem, _))));
     auto const old_rank = rank_of(mem, r);
     return mem.template make_index(Node{
         .elt   = std::move(e),
-        .left  = std::move(l),
-        .right = std::move(r),
+        .left  = l,
+        .right = r,
         .rank  = narrow<Rank>(old_rank + 1)});
   }
 
   static Index
-      merge(auto& mem, auto less, Index const& node1, Index const& node2) {
+      merge(auto mem, auto less, Read<Index> node1, Read<Index> node2) {
     if(mem.is_null(node1)) return node2;
-    else if(mem.is_null(node2)) return node1;
+    if(mem.is_null(node2)) return node1;
     else if(less(mem[node2].elt, mem[node1].elt))
       return make(mem,
                   mem[node2].elt,
@@ -125,7 +135,7 @@ struct Node {
   }
 
   template<class size_type>
-  static size_type count(auto const& mem, Index const& node) {
+  static size_type count(auto const mem, Read<Index> node) {
     return mem.is_null(node)
              ? size_type{}
              : (size_type{1} + count(mem[node].left)
@@ -137,6 +147,7 @@ struct Node {
 // the vector for the vector memory
 template<class T, class Less, class Mem_, class Node>
 // TODO: Are there other useful definitions of Node?
+// if element has ~6 unused bits, we can put rank in it
 class Heap {
   using node = Node;
   using Mem  = Mem_;
