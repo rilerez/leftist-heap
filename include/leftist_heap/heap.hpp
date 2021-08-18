@@ -12,15 +12,16 @@ template<class T>
 struct vector_mem {
   // probably needs better name. Pointdex? Inder?
   // key handle reference
-  std::vector<T>* block;
   using Index = size_t;
+  std::vector<T>* block;
 
   T const& operator[](Index i) const {
     ASSERT(!is_null(i));
     return (*block)[i - 1];
   }
 
-  bool is_null(Index i) const { return i == 0; }
+  Index null() const { return 0; }
+  bool  is_null(Index i) const { return i == 0; }
 
   Index make_index(auto&&... args) {
     block->emplace_back(FWD(args)...);
@@ -37,7 +38,8 @@ struct shared_ptr_mem {
     return *static_cast<T*>(i.get());
   }
 
-  bool is_null(Index const& x) const { return x == nullptr; }
+  Index null() const { return {}; }
+  bool  is_null(Index const& x) const { return x == nullptr; }
   auto make_index(auto&&... args) ARROW(std::make_shared<T>(FWD(args)...))
 };
 
@@ -55,21 +57,20 @@ struct Node {
   Index right;
 
   static Rank rank_of(auto& mem, Index n) {
-    return mem.is_null(n) ? 0 : mem[n].rank;
+    return mem.is_null(n) ? Rank{} : mem[n].rank;
   }
 
   static Index make(auto& mem, T e, Index node1, Index node2) {
     auto [r, l] =
         std::minmax(node1, node2, cmp_by([&] FN(rank_of(mem, _))));
     auto old_rank = rank_of(mem, r);
-
     return mem.template make_index(
         Node{.elt = e, .rank = old_rank + 1, .left = l, .right = r});
   }
 
   static Index merge(auto& mem, auto less, Index node1, Index node2) {
-    if(!node1) return node2;
-    else if(!node2)
+    if(mem.is_null(node1)) return node2;
+    else if(mem.is_null(node2))
       return node1;
     else if(less(mem[node2].elt, mem[node1].elt))
       return make(mem,
@@ -83,18 +84,20 @@ struct Node {
                   merge(mem, less, mem[node1].right, node2));
   }
 
-  static size_t count(auto const& mem, Index node) {
-    if(!node) return 0;
-    else
-      return 1 + count(mem[node].left) + count(mem[node].right);
+  template<class size_type>
+  static size_type count(auto const& mem, Index node) {
+    return mem.is_null(node) ? size_type{}
+                             : (size_type{1} + count(mem[node].left)
+                                + count(mem[node].right));
   }
 };
 
 template<class T, class Less, template<class> class Mem_, class Node>
 class Heap {
-  using node = Node;
-  using Mem  = Mem_<node>;
-  using idx  = typename node::Index;
+  using node      = Node;
+  using Mem       = Mem_<node>;
+  using idx       = typename node::Index;
+  using size_type = std::size_t;
 
   [[no_unique_address]] Less        less_;
   [[no_unique_address]] mutable Mem mem_;
@@ -115,17 +118,22 @@ class Heap {
 
   Heap pop() const {
     ASSERT(!empty());
-    return Heap{
-        mem_,
-        less_,
-        node::merge(mem_, less_, mem_[root_].left, mem_[root_].right)};
+    return {mem_,
+            less_,
+            node::merge(mem_, less_, mem_[root_].left, mem_[root_].right)};
   }
 
   Heap cons(T e) const {
-    return {
-        mem_,
-        less_,
-        node::merge(mem_, less_, root_, node::make(mem_, e, idx{}, idx{}))};
+    return {mem_,
+            less_,
+            node::merge(mem_,
+                        less_,
+                        root_,
+                        node::make(mem_, e, mem_.null(), mem_.null()))};
+  }
+
+  size_type size() const {
+    return node::template count<size_type>(root_);
   }
 };
 
