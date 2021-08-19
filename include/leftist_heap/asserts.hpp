@@ -26,9 +26,9 @@
 
 #ifndef ASSERTER
 #  define ASSERTER(...)                                                \
-    do {                                                               \
+    [&] {                                                               \
       if(!(__VA_ARGS__)) ASSERT_HANDLER(__VA_ARGS__);                  \
-    } while(false)
+    }()
 #endif
 
 #ifndef ASSERT_ENABLE_ASSUME

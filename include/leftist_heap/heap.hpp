@@ -11,8 +11,12 @@
 #include <limits>
 #include <cstdint>
 
+constexpr bool noex_assert(int level) {
+  return noexcept([] { ASSERT_HANDLER(false); }) && level <= ASSERT_LEVEL;
+}
+
 template<class To, class From>
-To narrow(From const x) {
+constexpr To narrow(From const x) noexcept(noex_assert(ASSERT_LEVEL_DEBUG)) {
   To y = static_cast<To>(x);
   ASSERT(x == static_cast<From>(y));
   return y;
@@ -43,16 +47,13 @@ struct vector_mem {
   using Index = Index_Num;
   vector* block;
 
-  // TODO: what is the right way to pass index?
-  // ideally they are small, so by value
-  // but they might do resource management, so by reference (shared_ptr
-  // -- prevent extra copy) I want to use a Read template. Is this too
-  // complicated?
-  T const& operator[](Index i) const {
+  // noexing this crashes clang too
+  T const& operator[](Index i) const
+      noexcept(noex_assert(ASSERT_LEVEL_DEBUG)) {
     ASSERT(!is_null(i));
     ASSERT_PARANOID(0 < i);
-    WITH_DIAGNOSTIC_TWEAK(
-        IGNORE_WASSUME, ASSERT_PARANOID(i <= block->size());)
+    WITH_DIAGNOSTIC_TWEAK(IGNORE_WASSUME, //
+                          ASSERT_PARANOID(i <= block->size());)
     // why does clang think vector::size() has sideffects?
     return (*block)[i - 1];
   }
@@ -60,24 +61,24 @@ struct vector_mem {
   Index null() const noexcept { return 0; }
   bool  is_null(Read<Index> i) const noexcept { return i == 0; }
 
-  Index make_index(auto&&... args) {
-    block->emplace_back(FWD(args)...);
-    return block->size();
-  }
+  Index make_index(auto&&... args)
+      NOEX(block->emplace_back(FWD(args)...), block->size())
 };
 
 template<class T>
 struct shared_ptr_mem {
   using Index = std::shared_ptr<void>;
 
-  T const& operator[](Index const& i) const {
+  // NOEX-ing this crashed clangd and clang-tidy?
+  T const& operator[](Index const& i) const
+      noexcept(noex_assert(ASSERT_LEVEL_DEBUG)) {
     ASSERT(!is_null(i));
     return *static_cast<T*>(i.get());
   }
 
-  Index null() const { return {}; }
-  bool  is_null(Index const& x) const { return x == nullptr; }
-  auto make_index(auto&&... args) ARROW(std::make_shared<T>(FWD(args)...))
+  Index null() const noexcept { return {}; }
+  bool  is_null(Index const& x) const NOEX(x == nullptr)
+  auto  make_index(auto&&... args) ARROW(std::make_shared<T>(FWD(args)...))
 };
 
 template<class Less = std::less<>>
@@ -101,20 +102,19 @@ struct Node {
   // max # is #uint64s - 1 (-1 for null) = uint64max = 2^64-1
   // so rank <= 64
 
-  static Rank rank_of(auto const mem, Read<Index> n) {
-    return mem.is_null(n) ? Rank{} : mem[n].rank;
-  }
+  static Rank rank_of(auto const mem, Read<Index> n)
+      NOEX(mem.is_null(n) ? Rank{} : mem[n].rank)
 
-  static Index
-      make(auto mem, T e, Read<Index> node1, Read<Index> node2) {
+  static Index make(auto mem, T e, Read<Index> node1, Read<Index> node2) //
+      noexcept(noex_assert(ASSERT_LEVEL_DEBUG)) {
     auto const& [r, l] =
         std::minmax(node1, node2, cmp_by([&] FN(rank_of(mem, _))));
     auto const old_rank = rank_of(mem, r);
-    return mem.template make_index(Node{
-        .elt   = std::move(e),
-        .left  = l,
-        .right = r,
-        .rank  = narrow<Rank>(old_rank + 1)});
+    return mem.template make_index(
+        Node{.elt   = std::move(e),
+             .left  = l,
+             .right = r,
+             .rank  = narrow<Rank>(old_rank + 1)});
   }
 
   static Index
@@ -135,15 +135,13 @@ struct Node {
   }
 
   template<class size_type>
-  static size_type count(auto const mem, Read<Index> node) {
-    return mem.is_null(node)
-             ? size_type{}
-             : (size_type{1} + count(mem[node].left)
-                + count(mem[node].right));
-  }
+  static size_type count(auto const mem, Read<Index> node) NOEX(
+      mem.is_null(node)
+          ? size_type{}
+          : (size_type{1} + count(mem[node].left) + count(mem[node].right)))
 };
 
-// as of now we need to say the mem and node types in order to construct
+// we already need to say the mem and node types in order to construct
 // the vector for the vector memory
 template<class T, class Less, class Mem_, class Node>
 // TODO: Are there other useful definitions of Node?
@@ -165,32 +163,25 @@ class Heap {
   explicit Heap(Mem mem = {}, Less less = {})
       : less_{std::move(less)}, mem_{std::move(mem)} {}
 
-  bool empty() const { return mem_.is_null(root_); }
+  bool empty() const NOEX(mem_.is_null(root_))
 
-  T const& peek() const {
-    ASSERT(!empty());
-    return mem_[root_].elt;
-  }
+  T const& peek() const NOEX(ASSERT(!empty()), mem_[root_].elt)
 
-  Heap pop() const {
-    ASSERT(!empty());
-    return {mem_,
-            less_,
-            node::merge(mem_, less_, mem_[root_].left, mem_[root_].right)};
-  }
+  Heap pop() const NOEX(
+      ASSERT(!empty()),
+      Heap{mem_,
+           less_,
+           node::merge(mem_, less_, mem_[root_].left, mem_[root_].right)})
 
-  Heap cons(T e) const {
-    return {mem_,
-            less_,
-            node::merge(mem_,
-                        less_,
-                        root_,
-                        node::make(mem_, e, mem_.null(), mem_.null()))};
-  }
+  Heap cons(T e) const NOEX(Heap{
+      mem_,
+      less_,
+      node::merge(mem_,
+                  less_,
+                  root_,
+                  node::make(mem_, e, mem_.null(), mem_.null()))})
 
-  size_type size() const {
-    return node::template count<size_type>(root_);
-  }
+  size_type size() const NOEX(node::template count<size_type>(root_))
 };
 
 template<class Coll, std::ranges::range Rng>

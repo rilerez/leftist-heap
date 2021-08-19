@@ -9,6 +9,9 @@
     return __VA_ARGS__;                                                \
   }
 
+#define NOEX(...)                                                      \
+  noexcept(noexcept(__VA_ARGS__)) { return __VA_ARGS__; }
+
 namespace leftist_heap { namespace fn_impl {
 template<class T>
 auto depend_id(auto x) {
@@ -44,7 +47,6 @@ struct fake {
   }
 
 #define FN(...) LEFTIST_HEAP_FN_(GENSYM(fn_type), __VA_ARGS__)
-
 
 #if defined(__clang__)
 #  define IGNORE_WASSUME                                               \
