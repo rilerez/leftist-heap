@@ -32,12 +32,6 @@ using Read = std::conditional_t<easy_to_copy<T>, T const, T const&>;
 static_assert(std::is_reference_v<Read<std::shared_ptr<void>>>);
 static_assert(!std::is_reference_v<Read<int>>);
 
-// TODO: noexcept correctness and assertions?
-// we don't necessarily want to abort if an assertion is triggered
-// we may want to throw and then autosave
-// But if we won't check the assertions, we do want noexcept
-// how important is that? i suspect most of these get inlined
-
 template<class T, class vector = std::vector<T>, class Index_Num = size_t>
 // It makes sense to use this with a boost::static_vector for example
 // Or to use different allocators.
@@ -105,8 +99,9 @@ struct Node {
   static Rank rank_of(auto const mem, Read<Index> n)
       NOEX(mem.is_null(n) ? Rank{} : mem[n].rank)
 
-  static Index make(auto mem, T e, Read<Index> node1, Read<Index> node2) //
-      noexcept(noex_assert(ASSERT_LEVEL_DEBUG)) {
+  static Index
+      make(auto mem, T e, Read<Index> node1, Read<Index> node2) noexcept(
+          noex_assert(ASSERT_LEVEL_DEBUG)) {
     auto const& [r, l] =
         std::minmax(node1, node2, cmp_by([&] FN(rank_of(mem, _))));
     auto const old_rank = rank_of(mem, r);
@@ -143,19 +138,19 @@ struct Node {
 
 // we already need to say the mem and node types in order to construct
 // the vector for the vector memory
-template<class T, class Less, class Mem_, class Node>
+template<class T, class Less, class Mem_, class Node_>
 // TODO: Are there other useful definitions of Node?
 // if element has ~6 unused bits, we can put rank in it
 class Heap {
-  using node = Node;
-  using Mem  = Mem_;
-  using idx  = typename node::Index;
+  using Node  = Node_;
+  using Mem   = Mem_;
+  using Index = typename Node::Index;
 
   [[no_unique_address]] Less        less_;
   [[no_unique_address]] mutable Mem mem_;
-  idx                               root_{};
+  Index                             root_{};
 
-  Heap(Mem mem, Less less, idx h)
+  Heap(Mem mem, Less less, Index h)
       : less_{std::move(less)}, mem_{std::move(mem)}, root_{std::move(h)} {}
 
  public:
@@ -171,17 +166,17 @@ class Heap {
       ASSERT(!empty()),
       Heap{mem_,
            less_,
-           node::merge(mem_, less_, mem_[root_].left, mem_[root_].right)})
+           Node::merge(mem_, less_, mem_[root_].left, mem_[root_].right)})
 
   Heap cons(T e) const NOEX(Heap{
       mem_,
       less_,
-      node::merge(mem_,
+      Node::merge(mem_,
                   less_,
                   root_,
-                  node::make(mem_, e, mem_.null(), mem_.null()))})
+                  Node::make(mem_, e, mem_.null(), mem_.null()))})
 
-  size_type size() const NOEX(node::template count<size_type>(root_))
+  size_type size() const NOEX(Node::template count<size_type>(root_))
 };
 
 template<class Coll, std::ranges::range Rng>
