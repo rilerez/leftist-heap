@@ -112,19 +112,21 @@ struct Node {
   }
 
   constexpr static Index
-      merge(auto mem, auto less, Read<Index> node1, Read<Index> node2) {
-    if(mem.is_null(node1)) return node2;
-    if(mem.is_null(node2)) return node1;
-    else if(less(mem[node2].elt, mem[node1].elt))
-      return make(mem,
-                  mem[node2].elt,
-                  mem[node2].left,
-                  merge(mem, less, node1, mem[node2].right));
-    else
-      return make(mem,
-                  mem[node1].elt,
-                  mem[node1].left,
-                  merge(mem, less, mem[node1].right, node2));
+      merge(auto mem, auto less, Read<Index> node1, Read<Index> node2) //
+      noexcept(noexcept(mem.is_null(node1)) &&                         //
+               noexcept(less(mem[node2].elt, mem[node1].elt)) &&       //
+               noexcept(make(mem, mem[node1].elt, node1, node2))) {
+    return mem.is_null(node1) ? node2
+         : mem.is_null(node2) ? node1
+         : less(mem[node2].elt, mem[node1].elt)
+             ? make(mem,
+                    mem[node2].elt,
+                    mem[node2].left,
+                    merge(mem, less, node1, mem[node2].right))
+             : make(mem,
+                    mem[node1].elt,
+                    mem[node1].left,
+                    merge(mem, less, node2, mem[node1].right));
     // always merge with the right b/c of leftist property
   }
 
