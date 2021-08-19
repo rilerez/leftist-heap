@@ -42,20 +42,19 @@ struct vector_mem {
   vector* block;
 
   // noexing this crashes clang too
-  T const& operator[](Index i) const
+  constexpr T const& operator[](Index i) const
       noexcept(noex_assert(ASSERT_LEVEL_DEBUG)) {
     ASSERT(!is_null(i));
     ASSERT_PARANOID(0 < i);
-    WITH_DIAGNOSTIC_TWEAK(IGNORE_WASSUME, //
-                          ASSERT_PARANOID(i <= block->size());)
+    WITH_DIAGNOSTIC_TWEAK(IGNORE_WASSUME, ASSERT_PARANOID(i <= block->size());)
     // why does clang think vector::size() has sideffects?
     return (*block)[i - 1];
   }
 
-  Index null() const noexcept { return 0; }
-  bool  is_null(Read<Index> i) const noexcept { return i == 0; }
+  constexpr Index null() const noexcept { return 0; }
+  constexpr bool  is_null(Read<Index> i) const noexcept { return i == 0; }
 
-  Index make_index(auto&&... args)
+  constexpr Index make_index(auto&&... args)
       NOEX(block->emplace_back(FWD(args)...), block->size())
 };
 
@@ -96,10 +95,10 @@ struct Node {
   // max # is #uint64s - 1 (-1 for null) = uint64max = 2^64-1
   // so rank <= 64
 
-  static Rank rank_of(auto const mem, Read<Index> n)
+  constexpr static Rank rank_of(auto const mem, Read<Index> n)
       NOEX(mem.is_null(n) ? Rank{} : mem[n].rank)
 
-  static Index
+  constexpr static Index
       make(auto mem, T e, Read<Index> node1, Read<Index> node2) noexcept(
           noex_assert(ASSERT_LEVEL_DEBUG)) {
     auto const& [r, l] =
@@ -112,7 +111,7 @@ struct Node {
              .rank  = narrow<Rank>(old_rank + 1)});
   }
 
-  static Index
+  constexpr static Index
       merge(auto mem, auto less, Read<Index> node1, Read<Index> node2) {
     if(mem.is_null(node1)) return node2;
     if(mem.is_null(node2)) return node1;
@@ -130,7 +129,7 @@ struct Node {
   }
 
   template<class size_type>
-  static size_type count(auto const mem, Read<Index> node) NOEX(
+  constexpr static size_type count(auto const mem, Read<Index> node) NOEX(
       mem.is_null(node)
           ? size_type{}
           : (size_type{1} + count(mem[node].left) + count(mem[node].right)))
@@ -141,6 +140,7 @@ struct Node {
 template<class T, class Less, class Mem_, class Node_>
 // TODO: Are there other useful definitions of Node?
 // if element has ~6 unused bits, we can put rank in it
+// We can also implement a weighted leftist heap by only changing Node_
 class Heap {
   using Node  = Node_;
   using Mem   = Mem_;
@@ -150,37 +150,38 @@ class Heap {
   [[no_unique_address]] mutable Mem mem_;
   Index                             root_{};
 
-  Heap(Mem mem, Less less, Index h)
+  constexpr Heap(Mem mem, Less less, Index h)
       : less_{std::move(less)}, mem_{std::move(mem)}, root_{std::move(h)} {}
 
  public:
   using size_type = std::size_t;
-  explicit Heap(Mem mem = {}, Less less = {})
+  constexpr explicit Heap(Mem mem = {}, Less less = {})
       : less_{std::move(less)}, mem_{std::move(mem)} {}
 
-  bool empty() const NOEX(mem_.is_null(root_))
+  constexpr bool empty() const NOEX(mem_.is_null(root_))
 
-  T const& peek() const NOEX(ASSERT(!empty()), mem_[root_].elt)
+  constexpr T const& peek() const NOEX(ASSERT(!empty()), mem_[root_].elt)
 
-  Heap pop() const NOEX(
+  constexpr Heap pop() const NOEX(
       ASSERT(!empty()),
       Heap{mem_,
            less_,
            Node::merge(mem_, less_, mem_[root_].left, mem_[root_].right)})
 
-  Heap cons(T e) const NOEX(Heap{
-      mem_,
-      less_,
-      Node::merge(mem_,
-                  less_,
-                  root_,
-                  Node::make(mem_, e, mem_.null(), mem_.null()))})
+  constexpr Heap cons(T e) const
+      NOEX(Heap{mem_,
+                less_,
+                Node::merge(mem_,
+                            less_,
+                            root_,
+                            Node::make(mem_, e, mem_.null(), mem_.null()))})
 
-  size_type size() const NOEX(Node::template count<size_type>(root_))
+  constexpr size_type size() const
+      NOEX(Node::template count<size_type>(root_))
 };
 
 template<class Coll, std::ranges::range Rng>
-inline auto into(Coll coll, Rng const data) {
+constexpr inline auto into(Coll coll, Rng const data) {
   for(auto x : data) coll = coll.cons(x);
   return coll;
 }
