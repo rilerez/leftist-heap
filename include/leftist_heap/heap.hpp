@@ -30,6 +30,8 @@ constexpr bool easy_to_copy<std::shared_ptr<T>> = false;
 
 template<class T>
 using Read = std::conditional_t<easy_to_copy<T>, T const, T const&>;
+template<class T>
+using ReadReturn = std::conditional_t<easy_to_copy<T>, T, T const&>;
 
 static_assert(std::is_reference_v<Read<std::shared_ptr<void>>>);
 static_assert(!std::is_reference_v<Read<int>>);
@@ -97,16 +99,16 @@ struct Node {
              // complicates logic
   // rank <= floor(log(n+1))
   // Okasaki, Purely functional data structures Exercise 3.1
-  // if key =uint64
+  // if key=uint64
   // max # is #uint64s - 1 (-1 for null) = uint64max = 2^64-1
-  // so rank <= 64
+  // so rank <= 64, within uint8_t
 
   constexpr static Rank rank_of(auto const mem, Read<Key> n)
       NOEX(mem.is_null(n) ? Rank{} : mem[n].rank)
 
   constexpr static Key
-      make(auto mem, T e, Read<Key> node1, Read<Key> node2) noexcept(
-          noex_assert(ASSERT_LEVEL_DEBUG)) {
+      make(auto mem, T e, Read<Key> node1, Read<Key> node2) //
+      noexcept(noex_assert(ASSERT_LEVEL_DEBUG)) {
     auto const& [r, l] =
         std::minmax(node1, node2, cmp_by([&] FN(rank_of(mem, _))));
     auto const old_rank = rank_of(mem, r);
@@ -168,7 +170,8 @@ class Heap {
 
   constexpr bool empty() const NOEX(mem_.is_null(root_))
 
-  constexpr T const& peek() const NOEX(ASSERT(!empty()), mem_[root_].elt)
+  constexpr ReadReturn<T> peek() const
+      NOEX(ASSERT(!empty()), mem_[root_].elt)
 
   constexpr Heap pop() const NOEX(
       ASSERT(!empty()),
