@@ -14,13 +14,13 @@ TEST_CASE("A new Heap is empty") {
 
 TEST_CASE("A heap with one element is not empty") {
   MyHeap h0{};
-  auto   h1 = into(h0, std::initializer_list<int>{3});
+  auto   h1 = into(h0, std::vector<int>{3});
   REQUIRE(!h1.empty());
 }
 
 TEST_CASE("Peeking a heap with one element gives you that element") {
   MyHeap h0{};
-  auto   h1 = into(h0, std::initializer_list<int>{3});
+  auto   h1 = into(h0, std::vector<int>{3});
   REQUIRE(h1.peek() == 3);
 }
 
@@ -32,7 +32,7 @@ TEST_CASE("Popping a heap with one element gives you the empty heap") {
 
 TEST_CASE("Popping a heap sorts") {
   MyHeap h0{};
-  auto   h1 = into(h0, std::initializer_list<int>{5, 1, 2, 10, 3});
+  auto   h1 = into(h0, std::vector<int>{5, 1, 2, 10, 3});
   REQUIRE(h1.pop().peek() == 2);
 }
 

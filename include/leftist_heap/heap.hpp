@@ -4,12 +4,13 @@
 #include "macros.hpp"
 #include "asserts.hpp"
 
+#include <numeric>
 #include <memory>
 #include <algorithm>
 #include <ranges>
-
 #include <limits>
 #include <cstdint>
+//#include <execution> //tbb is giving me linker errors
 
 constexpr bool noex_assert(int level) {
   return noexcept([] { ASSERT_HANDLER(false); }) && level <= ASSERT_LEVEL;
@@ -25,8 +26,6 @@ constexpr To narrow(From const x) noexcept(noex_assert(ASSERT_LEVEL_DEBUG)) {
 template<class T>
 constexpr bool easy_to_copy =
     std::is_trivially_copyable_v<T> && sizeof(T) <= 4 * sizeof(void*);
-template<class T>
-constexpr bool easy_to_copy<std::shared_ptr<T>> = false;
 
 template<class T>
 using Read = std::conditional_t<easy_to_copy<T>, T const, T const&>;
@@ -74,21 +73,23 @@ struct shared_ptr_mem {
     return *static_cast<T*>(i.get());
   }
 
-  Key  null() const noexcept { return {}; }
+  Key  null() const { return {}; }
   bool is_null(Key const& x) const NOEX(x == nullptr)
-  auto make_key(auto&&... args) ARROW(std::make_shared<T>(FWD(args)...))
+  auto make_key(auto&&... args)
+      ARROW(Key{std::make_shared<T>(FWD(args)...)})
 };
 
 // TODO: what is the right semantics for const, thread safety, and mems?
 
 template<class Less = std::less<>>
-constexpr auto cmp_by(auto&& f, Less&& less = {}) noexcept {
+constexpr auto cmp_by(auto&& f, Less&& less = {}) {
   return [ f = FWD(f), less = FWD(less) ] FN(less(f(_0), f(_1)));
 }
 
 template<class T, class key, class Rank = std::uint8_t>
 struct Node {
-  using Key = key;
+  using element_t = T;
+  using Key       = key;
   // TODO: how much can these be compressed?
   // realistically, Key cannot be smaller than uint8: 2^4= 16 very small heap
   // when is it small enough to be worth just copying a vector/vector heap?
@@ -107,10 +108,12 @@ struct Node {
       NOEX(mem.is_null(n) ? Rank{} : mem[n].rank)
 
   constexpr static Key
-      make(auto mem, T e, Read<Key> node1, Read<Key> node2) //
-      noexcept(noex_assert(ASSERT_LEVEL_DEBUG)) {
+      make(auto mem, T e, Read<Key> node1, Read<Key> node2) noexcept(
+          noexcept(rank_of(mem, node1),
+                   mem.make_key(node1),
+                   narrow<Rank>(Rank{} + 1))) {
     auto const& [r, l] =
-        std::minmax(node1, node2, cmp_by([&] FN(rank_of(mem, _))));
+        std::minmax(node1, node2, cmp_by([=] FN(rank_of(mem, _))));
     auto const old_rank = rank_of(mem, r);
     return mem.template make_key(
         Node{.elt   = std::move(e),
@@ -120,10 +123,10 @@ struct Node {
   }
 
   constexpr static Key
-      merge(auto mem, auto less, Read<Key> node1, Read<Key> node2) //
-      noexcept(noexcept(mem.is_null(node1)) &&                     //
-               noexcept(less(mem[node2].elt, mem[node1].elt)) &&   //
-               noexcept(make(mem, mem[node1].elt, node1, node2))) {
+      merge(auto mem, auto less, Read<Key> node1, Read<Key> node2) noexcept(
+          noexcept(mem.is_null(node1),
+                   less(mem[node2].elt, mem[node1].elt),
+                   make(mem, mem[node1].elt, node1, node2))) {
     return mem.is_null(node1) ? node2
          : mem.is_null(node2) ? node1
          : less(mem[node2].elt, mem[node1].elt)
@@ -137,6 +140,89 @@ struct Node {
                     merge(mem, less, node2, mem[node1].right));
     // always merge with the right b/c of leftist property
   }
+};
+
+template<class T, class key, class Weight = std::size_t>
+struct WeightNode {
+  using element_t = T;
+  using Key       = key;
+  // TODO: how much can these be compressed?
+  // realistically, Key cannot be smaller than uint8: 2^4= 16 very small heap
+  // when is it small enough to be worth just copying a vector/vector heap?
+  T      elt;
+  Key    left;
+  Key    right;
+  Weight weight; // should we store rank-1 instead? Might increase range
+                 // but complicates logic
+  // rank <= floor(log(n+1))
+  // Okasaki, Purely functional data structures Exercise 3.1
+  // if key=uint64
+  // max # is #uint64s - 1 (-1 for null) = uint64max = 2^64-1
+  // so rank <= 64, within uint8_t
+
+  constexpr static Weight weight_of(auto const mem, Read<Key> n)
+      NOEX(mem.is_null(n) ? Weight{} : mem[n].weight)
+
+  constexpr static Key
+      make(auto mem, T e, Read<Key> node1, Read<Key> node2) noexcept(
+          noexcept(rank_of(mem, node1),
+                   mem.make_key(node1),
+                   narrow<Weight>(Weight{} + 1))) {
+    auto const& [r, l] =
+        std::minmax(node1, node2, cmp_by([=] FN(weight_of(mem, _))));
+    return mem.template make_key(
+        Node{.elt    = std::move(e),
+             .left   = l,
+             .right  = r,
+             .weight = narrow<Weight>(1 + l.weight + r.weight)});
+  }
+
+  constexpr static Key
+      merge(auto mem, auto less, Read<Key> node1, Read<Key> node2) noexcept(
+          noexcept(mem.is_null(node1),
+                   less(mem[node2].elt, mem[node1].elt),
+                   make(mem, mem[node1].elt, node1, node2))) {
+    return mem.is_null(node1) ? node2
+         : mem.is_null(node2) ? node1
+         : less(mem[node2].elt, mem[node1].elt)
+             ? make(mem,
+                    mem[node2].elt,
+                    mem[node2].left,
+                    merge(mem, less, node1, mem[node2].right))
+             : make(mem,
+                    mem[node1].elt,
+                    mem[node1].left,
+                    merge(mem, less, node2, mem[node1].right));
+    // always merge with the right b/c of leftist property
+  }
+};
+
+template<class Node_>
+struct NodeUtil {
+  using Node = Node_;
+  using Key  = typename Node::Key;
+  using T    = typename Node::element_t;
+
+  constexpr static auto make1(auto mem, auto e)
+      ARROW(Node::make(mem, e, mem.null(), mem.null()))
+
+  constexpr static ReadReturn<T> peek(auto const mem, Read<Key> k)
+      NOEX(mem[k].elt)
+  constexpr static Key pop(auto mem, auto less, Read<Key> k)
+      NOEX(Node::merge(mem, less, mem[k].left, mem[k].right))
+
+  constexpr static auto cons(auto mem, auto less, T e, Read<Key> node1)
+      ARROW(Node::merge(mem, less, node1, make1(mem, e)))
+
+  template<class Mem>
+  static constexpr bool is_counted_node = requires(Mem mem, Node node) {
+    Node::counted(mem, node);
+  };
+
+  template<class Mem, class _>
+  requires(is_counted_node<Mem>) //
+      constexpr static auto count(Mem const mem, Read<Key> node)
+          NOEX(Node::count(mem, node))
 
   template<class size_type>
   constexpr static size_type count(auto const mem, Read<Key> node) NOEX(
@@ -156,9 +242,11 @@ class Heap {
   using Mem  = Mem_;
   using Key  = typename Node::Key;
 
+  using NodeU = NodeUtil<Node>;
+
   [[no_unique_address]] Less        less_;
   [[no_unique_address]] mutable Mem mem_;
-  Key                               root_{};
+  Key                               root_;
 
   constexpr Heap(Mem mem, Less less, Key h)
       : less_{std::move(less)}, mem_{std::move(mem)}, root_{std::move(h)} {}
@@ -166,34 +254,24 @@ class Heap {
  public:
   using size_type = std::size_t;
   constexpr explicit Heap(Mem mem = {}, Less less = {})
-      : less_{std::move(less)}, mem_{std::move(mem)} {}
+      : Heap(mem, std::move(less), mem.null()) {}
 
   constexpr bool empty() const NOEX(mem_.is_null(root_))
 
-  constexpr ReadReturn<T> peek() const
-      NOEX(ASSERT(!empty()), mem_[root_].elt)
+  constexpr ReadReturn<T> peek() const NOEX(NodeU::peek(mem_, root_))
 
-  constexpr Heap pop() const NOEX(
-      ASSERT(!empty()),
-      Heap{mem_,
-           less_,
-           Node::merge(mem_, less_, mem_[root_].left, mem_[root_].right)})
+  constexpr Heap pop() const
+      NOEX(Heap{mem_, less_, NodeU::pop(mem_, less_, root_)})
 
   constexpr Heap cons(T e) const
-      NOEX(Heap{mem_,
-                less_,
-                Node::merge(mem_,
-                            less_,
-                            root_,
-                            Node::make(mem_, e, mem_.null(), mem_.null()))})
+      RET(Heap{mem_, less_, NodeU::cons(mem_, less_, e, root_)})
 
   constexpr size_type size() const
-      NOEX(Node::template count<size_type>(root_))
+      NOEX(NodeU::template count<size_type>(root_))
 };
 
-template<class Coll, std::ranges::range Rng>
-constexpr inline auto into(Coll coll, Rng const data) {
-  for(auto x : data) coll = coll.cons(x);
+auto into(auto coll, auto data) {
+  for(auto&& d : data) coll = coll.cons(d);
   return coll;
 }
 #endif // LEFTIST_HEAP_HPP_INCLUDE_GUARD

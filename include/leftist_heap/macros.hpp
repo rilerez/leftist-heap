@@ -4,6 +4,8 @@
 #include "hedley.h"
 
 #define FWD(...) (static_cast<decltype(__VA_ARGS__)&&>(__VA_ARGS__))
+#define RET(...)                                                          \
+  { return __VA_ARGS__; }
 #define ARROW(...)                                                        \
   noexcept(noexcept(__VA_ARGS__))->decltype(__VA_ARGS__) {                \
     return __VA_ARGS__;                                                   \
