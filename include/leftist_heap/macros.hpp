@@ -47,6 +47,8 @@ struct fake {
     return __VA_ARGS__;                                                   \
   }
 // ARROW([&](auto& _) ARROW(__VA_ARGS__)(_0)) as the body crashed clang-tidy
+// TODO: how to make this noexcept-correct? These will probably be inlined
+// so it's low priority
 
 #define FN(...) LEFTIST_HEAP_FN_(GENSYM(fn_type), __VA_ARGS__)
 
@@ -58,5 +60,15 @@ struct fake {
 
 #define WITH_DIAGNOSTIC_TWEAK(diagnostic, ...)                            \
   HEDLEY_DIAGNOSTIC_PUSH diagnostic __VA_ARGS__ HEDLEY_DIAGNOSTIC_POP
+
+#ifndef LEFTIST_HEAP_ASSERT
+#  include <assert.h>
+#  define LEFTIST_HEAP_ASSERT(...)     assert(__VA_ARGS__);
+#  define LEFTIST_HEAP_ASSERT_NOEXCEPT true
+#endif
+
+#ifndef LEFTIST_HEAP_ASSERT_NOEXCEPT
+#  define LEFTIST_HEAP_ASSERT_NOEXCEPT noexcept(LEFTIST_HEAP_ASSERT(false))
+#endif
 
 #endif // LEFTIST_HEAP_MACROS_INCLUDE_GUARD

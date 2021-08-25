@@ -1,0 +1,40 @@
+#+TITLE: Lessons
+
+* functional data structures come in 2.5 pieces
+** the owner/scratch pad
+*** traditionally the GC'd heap
+*** responsibilities
+**** ownership/memory management
+**** quick lookup
+**** quick push
+***** returns a key that can be used for lookup
+****** could be a pointer
+****** could be an index
+*** this may be built on top of an allocator
+*** potential names
+**** holder
+**** proprietor
+**** owner
+**** container
+**** keeper
+**** sharer
+** the node
+*** traditionally the data structure
+*** responsibilities
+**** no ownership
+**** relies on an owner to lookup data + traverse itself
+**** implements a basis
+** a view/facade
+*** makes working with the nodes convenient
+*** stores some view type to an owner
+*** via owner_view:
+**** stateless if
+***** reference counting is used (shared_ptr)
+***** a plugin garbage collector is used (boehm gc, lua vm)
+***** the owner is global
+* how to decouple the owner from the nodes?
+** many different kinds of trees might use one owner
+* analogy with index, range, range_view, iterator
+* design tensions
+** customizability/efficiency vs code brevity/code duplication
+** convenience vs efficiency/optimizability

@@ -1,0 +1,4 @@
+* hybrid heap---nodes are mini heaps (or maybe sorted?)
+** cache locality
+*** dercease the need to chase pointers
+** if nodes are small, just sort

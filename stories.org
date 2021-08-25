@@ -1,0 +1,8 @@
+#+TITLE: Stories
+* allocated with shared_ptr
+* allocated on a garbage collector
+** boehm gc
+** embedded language's vm
+* allocated on a scope-bound buffer
+** maybe the buffer can collect
+** obstack?
